@@ -157,7 +157,8 @@ fn hash_file(path: &Path) -> BuildResult<String> {
     let data = std::fs::read(path)?;
     let mut hasher = Sha256::new();
     hasher.update(&data);
-    Ok(format!("{:x}", hasher.finalize()))
+    let hash = hasher.finalize();
+    Ok(hash.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Get a build record by ID.
