@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Mutex;
 
 /// Shared state for build routes.
 #[derive(Clone)]
@@ -17,19 +18,30 @@ pub struct BuildState {
     pub pool: ConnPool,
 }
 
+/// Internal state with concurrency guard.
+#[derive(Clone)]
+struct InnerState {
+    pool: ConnPool,
+    build_lock: Arc<Mutex<()>>,
+}
+
 /// Build the self-build router.
 pub fn router(state: Arc<BuildState>) -> Router {
+    let inner = Arc::new(InnerState {
+        pool: state.pool.clone(),
+        build_lock: Arc::new(Mutex::new(())),
+    });
     Router::new()
         .route("/api/build/self", post(trigger_build))
         .route("/api/build/status/:id", get(build_status))
         .route("/api/build/history", get(build_history))
         .route("/api/build/deploy/:id", post(deploy_build))
         .route("/api/build/rollback", post(rollback_build))
-        .with_state(state)
+        .with_state(inner)
 }
 
 /// POST /api/build/self — Trigger a new self-build.
-async fn trigger_build(State(st): State<Arc<BuildState>>) -> Json<Value> {
+async fn trigger_build(State(st): State<Arc<InnerState>>) -> Json<Value> {
     let commit = builder::current_commit();
     let build_id = match builder::create_build(&st.pool, &commit) {
         Ok(id) => id,
@@ -38,10 +50,11 @@ async fn trigger_build(State(st): State<Arc<BuildState>>) -> Json<Value> {
 
     let pool = st.pool.clone();
     let id = build_id.clone();
+    let lock = st.build_lock.clone();
 
     // Run build in background task
     tokio::spawn(async move {
-        run_build_pipeline(pool, id).await;
+        run_build_pipeline(pool, id, lock).await;
     });
 
     Json(json!({
@@ -53,7 +66,9 @@ async fn trigger_build(State(st): State<Arc<BuildState>>) -> Json<Value> {
 }
 
 /// Background build pipeline: check → test → build → update DB.
-async fn run_build_pipeline(pool: ConnPool, build_id: String) {
+/// Acquires build_lock to prevent concurrent builds from racing.
+async fn run_build_pipeline(pool: ConnPool, build_id: String, build_lock: Arc<Mutex<()>>) {
+    let _guard = build_lock.lock().await;
     let start = Instant::now();
     let workspace = builder::workspace_root();
 
@@ -107,7 +122,7 @@ async fn run_build_pipeline(pool: ConnPool, build_id: String) {
 }
 
 /// GET /api/build/status/:id — Get build status.
-async fn build_status(State(st): State<Arc<BuildState>>, Path(id): Path<String>) -> Json<Value> {
+async fn build_status(State(st): State<Arc<InnerState>>, Path(id): Path<String>) -> Json<Value> {
     match builder::get_build(&st.pool, &id) {
         Ok(rec) => Json(json!({"ok": true, "build": rec})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
@@ -124,19 +139,22 @@ fn default_limit() -> i64 {
     20
 }
 
+const MAX_HISTORY_LIMIT: i64 = 100;
+
 /// GET /api/build/history — List recent builds.
 async fn build_history(
-    State(st): State<Arc<BuildState>>,
+    State(st): State<Arc<InnerState>>,
     Query(q): Query<HistoryQuery>,
 ) -> Json<Value> {
-    match builder::list_builds(&st.pool, q.limit) {
+    let limit = q.limit.clamp(1, MAX_HISTORY_LIMIT);
+    match builder::list_builds(&st.pool, limit) {
         Ok(builds) => Json(json!({"ok": true, "builds": builds})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
 }
 
 /// POST /api/build/deploy/:id — Deploy a successful build.
-async fn deploy_build(State(st): State<Arc<BuildState>>, Path(id): Path<String>) -> Json<Value> {
+async fn deploy_build(State(st): State<Arc<InnerState>>, Path(id): Path<String>) -> Json<Value> {
     // Verify build succeeded
     let record = match builder::get_build(&st.pool, &id) {
         Ok(r) => r,
@@ -165,7 +183,7 @@ async fn deploy_build(State(st): State<Arc<BuildState>>, Path(id): Path<String>)
 }
 
 /// POST /api/build/rollback — Rollback to previous binary.
-async fn rollback_build(State(_st): State<Arc<BuildState>>) -> Json<Value> {
+async fn rollback_build(State(_st): State<Arc<InnerState>>) -> Json<Value> {
     let workspace = builder::workspace_root();
     match crate::deployer::rollback(&workspace) {
         Ok(()) => Json(json!({
