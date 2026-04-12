@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/Roberdan/convergio-build/compare/convergio-build-v0.1.1...convergio-build-v0.1.2) (2026-04-12)
+
+
+### Bug Fixes
+
+* use byte iteration for SHA-256 hex encoding (sha2 0.11 compat) ([1518a1f](https://github.com/Roberdan/convergio-build/commit/1518a1fa0722beca54791ee34d2f458d50968620))
+
 ## [0.1.1](https://github.com/Roberdan/convergio-build/compare/convergio-build-v0.1.0...convergio-build-v0.1.1) (2026-04-12)
 
 
