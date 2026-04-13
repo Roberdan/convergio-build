@@ -4,6 +4,7 @@ description = "Build pipeline management — compile, package, and artifact mana
 version = "0.1.3"
 edition.workspace = true
 license.workspace = true
+repository = "https://github.com/Roberdan/convergio-build"
 
 [dependencies]
 convergio-types = { workspace = true }
