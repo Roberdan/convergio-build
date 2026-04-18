@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6](https://github.com/Roberdan/convergio-build/compare/v0.1.5...v0.1.6) (2026-04-18)
+
+
+### Bug Fixes
+
+* resolve error swallowing, stuck build on panic, and silent data loss ([f76e929](https://github.com/Roberdan/convergio-build/commit/f76e9297c0a11fc30a9d4029e95bf7471507a12a))
+* security and quality audit pass 2 ([e0cb2e9](https://github.com/Roberdan/convergio-build/commit/e0cb2e9504d686c9d84c4a2076a8dcd17bd3e173))
+
 ## [0.1.5](https://github.com/Roberdan/convergio-build/compare/v0.1.4...v0.1.5) (2026-04-14)
 
 
