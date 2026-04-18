@@ -73,7 +73,9 @@ async fn run_build_pipeline(pool: ConnPool, build_id: String, build_lock: Arc<Mu
     let workspace = builder::workspace_root();
 
     // Mark as building
-    let _ = builder::update_status(&pool, &build_id, BuildStatus::Building);
+    if let Err(e) = builder::update_status(&pool, &build_id, BuildStatus::Building) {
+        tracing::error!(build_id, error = %e, "failed to set building status");
+    }
 
     // Run build (blocking — offload to spawn_blocking)
     let ws = workspace.clone();
@@ -96,7 +98,9 @@ async fn run_build_pipeline(pool: ConnPool, build_id: String, build_lock: Arc<Mu
                 error: None,
                 duration_secs: Some(duration),
             };
-            let _ = builder::complete_build(&pool, &build_id, &record);
+            if let Err(e) = builder::complete_build(&pool, &build_id, &record) {
+                tracing::error!(build_id, error = %e, "failed to record build success");
+            }
             tracing::info!(build_id, duration, test_count, "self-build succeeded");
         }
         Ok(Err(e)) => {
@@ -112,11 +116,28 @@ async fn run_build_pipeline(pool: ConnPool, build_id: String, build_lock: Arc<Mu
                 error: Some(e.to_string()),
                 duration_secs: Some(duration),
             };
-            let _ = builder::complete_build(&pool, &build_id, &record);
+            if let Err(db_err) = builder::complete_build(&pool, &build_id, &record) {
+                tracing::error!(build_id, error = %db_err, "failed to record build failure");
+            }
             tracing::error!(build_id, error = %e, "self-build failed");
         }
         Err(e) => {
             tracing::error!(build_id, error = %e, "self-build task panicked");
+            let record = BuildRecord {
+                id: build_id.clone(),
+                status: BuildStatus::Failed,
+                commit_hash: commit,
+                test_count: None,
+                binary_hash: None,
+                binary_size: None,
+                started_at: String::new(),
+                completed_at: None,
+                error: Some("build task panicked".to_string()),
+                duration_secs: Some(duration),
+            };
+            if let Err(db_err) = builder::complete_build(&pool, &build_id, &record) {
+                tracing::error!(build_id, error = %db_err, "failed to record panic failure");
+            }
         }
     }
 }
@@ -170,7 +191,9 @@ async fn deploy_build(State(st): State<Arc<InnerState>>, Path(id): Path<String>)
     let workspace = builder::workspace_root();
     match crate::deployer::deploy(&workspace) {
         Ok(backup) => {
-            let _ = builder::update_status(&st.pool, &id, BuildStatus::Deployed);
+            if let Err(e) = builder::update_status(&st.pool, &id, BuildStatus::Deployed) {
+                tracing::error!(id = %id, error = %e, "failed to set deployed status");
+            }
             Json(json!({
                 "ok": true,
                 "deployed": true,

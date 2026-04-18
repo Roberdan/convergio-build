@@ -121,9 +121,8 @@ pub fn run_build(workspace: &Path) -> BuildResult<(i64, String, i64)> {
     // Hash + size of produced binary
     let binary = workspace.join("target/release/convergio");
     let hash = hash_file(&binary)?;
-    let size = std::fs::metadata(&binary)
-        .map(|m| m.len() as i64)
-        .unwrap_or(0);
+    let meta = std::fs::metadata(&binary)?;
+    let size = meta.len() as i64;
     info!(hash = %hash, size, "release binary built");
 
     Ok((test_count, hash, size))
@@ -211,7 +210,15 @@ pub fn list_builds(pool: &ConnPool, limit: i64) -> BuildResult<Vec<BuildRecord>>
             duration_secs: row.get(9)?,
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    Ok(rows
+        .filter_map(|r| match r {
+            Ok(rec) => Some(rec),
+            Err(e) => {
+                tracing::warn!(error = %e, "skipping malformed build_history row");
+                None
+            }
+        })
+        .collect())
 }
 
 #[cfg(test)]
